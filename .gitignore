@@ -1,0 +1,12 @@
+node_modules
+dist
+build
+.env
+client/.env
+server/.env
+contracts/.env
+artifacts
+cache
+coverage
+.DS_Store
+
