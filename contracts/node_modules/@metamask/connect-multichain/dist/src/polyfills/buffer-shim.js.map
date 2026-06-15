@@ -1,0 +1,1 @@
+{"version":3,"file":"buffer-shim.js","sourceRoot":"","sources":["../../../src/polyfills/buffer-shim.ts"],"names":[],"mappings":";AAAA,0FAA0F;AAC1F;;;;;;;GAOG;AACH,OAAO,EAAE,MAAM,EAAE,MAAM,QAAQ,CAAC;AAEhC,OAAO,EAAE,eAAe,EAAE,MAAM,qBAAqB,CAAC;AAEtD,wFAAwF;AACxF,MAAM,SAAS,GAAG,eAAe,EAAE,CAAC;AACpC,MAAA,SAAS,CAAC,MAAM,oCAAhB,SAAS,CAAC,MAAM,GAAK,MAAM,EAAC"}

@@ -1,0 +1,13 @@
+{
+  "entries": [
+    "components/mm-install-modal/mm-install-modal.js",
+    "components/mm-otp-modal/mm-otp-modal.js"
+  ],
+  "compiler": {
+    "name": "@stencil/core",
+    "version": "4.22.2",
+    "typescriptVersion": "5.5.4"
+  },
+  "collections": [],
+  "bundles": []
+}

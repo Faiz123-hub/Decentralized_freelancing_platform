@@ -1,0 +1,42 @@
+import { CONTENT_SCRIPT, INPAGE, METAMASK_EXTENSION_CONNECT_CAN_RETRY } from "../transports/constants.mjs";
+import { METAMASK_PROVIDER_STREAM_NAME } from "../transports/constants.mjs";
+/**
+ * Get the MetaMask extension ID by sending a metamask_getProviderState to the content script
+ */
+export async function detectMetamaskExtensionId() {
+    return new Promise((resolve, reject) => {
+        const messageHandler = (event) => {
+            if (isProviderMessage(event)) {
+                const data = event?.data?.data?.data;
+                // When a retry message is received, it means the previous getProviderState request was not received by the extension, so we need to retry
+                if (data?.method === METAMASK_EXTENSION_CONNECT_CAN_RETRY) {
+                    getProviderState();
+                }
+                // Handle the provider state response
+                else if (data?.result?.extensionId) {
+                    const extensionId = data?.result?.extensionId;
+                    resolve(extensionId);
+                    window.removeEventListener('message', messageHandler);
+                    clearTimeout(timeoutId);
+                }
+            }
+        };
+        const timeoutId = setTimeout(() => {
+            window.removeEventListener('message', messageHandler);
+            reject(new Error('MetaMask extension not found'));
+        }, 10000);
+        window.addEventListener('message', messageHandler);
+        getProviderState();
+    });
+}
+function getProviderState() {
+    window.postMessage({
+        target: CONTENT_SCRIPT,
+        data: { name: METAMASK_PROVIDER_STREAM_NAME, data: { method: 'metamask_getProviderState' } },
+    }, location.origin);
+}
+function isProviderMessage(event) {
+    const { target, data } = event.data;
+    return target === INPAGE && data?.name === METAMASK_PROVIDER_STREAM_NAME && event.origin === location.origin;
+}
+//# sourceMappingURL=metamaskExtensionId.mjs.map
