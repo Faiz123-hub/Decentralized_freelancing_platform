@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import { getDefaultWalletForRole, isDefaultWallet } from "../utils/defaultWallets.js";
 
 function RegisterPage() {
   const navigate = useNavigate();
@@ -10,7 +11,7 @@ function RegisterPage() {
     email: "",
     password: "",
     role: "client",
-    walletAddress: "",
+    walletAddress: getDefaultWalletForRole("client"),
     skills: "",
     bio: ""
   });
@@ -59,17 +60,29 @@ function RegisterPage() {
         <select
           className="rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none focus:border-brand-400"
           value={formData.role}
-          onChange={(event) => setFormData({ ...formData, role: event.target.value })}
+          onChange={(event) => {
+            const role = event.target.value;
+            const shouldUseDefault = !formData.walletAddress || isDefaultWallet(formData.walletAddress);
+
+            setFormData({
+              ...formData,
+              role,
+              walletAddress: shouldUseDefault ? getDefaultWalletForRole(role) : formData.walletAddress
+            });
+          }}
         >
           <option value="client">Client</option>
           <option value="freelancer">Freelancer</option>
         </select>
         <input
           className="md:col-span-2 rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none focus:border-brand-400"
-          placeholder="Wallet address (optional)"
+          placeholder="Wallet address"
           value={formData.walletAddress}
           onChange={(event) => setFormData({ ...formData, walletAddress: event.target.value })}
         />
+        <p className="md:col-span-2 -mt-2 text-xs text-slate-400">
+          Temporary default for {formData.role}: {getDefaultWalletForRole(formData.role)}
+        </p>
         <input
           className="md:col-span-2 rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none focus:border-brand-400"
           placeholder="Skills, comma separated"
@@ -105,4 +118,3 @@ function RegisterPage() {
 }
 
 export default RegisterPage;
-

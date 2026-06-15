@@ -1,3 +1,4 @@
+import { randomInt } from "crypto";
 import Application from "../models/Application.js";
 import Job from "../models/Job.js";
 import { fetchOnChainEscrowStatus, verifyTransactionSuccess } from "../services/escrowService.js";
@@ -6,6 +7,26 @@ const createHttpError = (message, statusCode) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
+};
+
+const demoContractAddress = "demo-escrow";
+
+const jobCodeCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+const generateJobCode = () =>
+  Array.from({ length: 5 }, () => jobCodeCharacters[randomInt(jobCodeCharacters.length)]).join("");
+
+const createUniqueJobCode = async () => {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const jobCode = generateJobCode();
+    const existingJob = await Job.exists({ jobCode });
+
+    if (!existingJob) {
+      return jobCode;
+    }
+  }
+
+  throw createHttpError("Unable to generate a unique job code", 500);
 };
 
 const toEscrowObject = (job) => ({
@@ -21,6 +42,26 @@ const toEscrowObject = (job) => ({
   fundedAt: job.escrow?.fundedAt || null,
   completedAt: job.escrow?.completedAt || null,
   releasedAt: job.escrow?.releasedAt || null
+});
+
+const isDemoEscrowTx = (txHash = "") => txHash.startsWith("demo-");
+
+const isDemoEscrow = (jobOrAddress, txHash = "") => {
+  const contractAddress =
+    typeof jobOrAddress === "string" ? jobOrAddress : jobOrAddress?.escrow?.contractAddress;
+
+  return contractAddress === demoContractAddress || isDemoEscrowTx(txHash);
+};
+
+const buildDemoOnChain = ({ job, onChainJobId, status, contractAddress = demoContractAddress, amountWei }) => ({
+  onChainJobId: Number(onChainJobId),
+  contractAddress,
+  client: job.client?.walletAddress || "",
+  freelancer: job.hiredFreelancer?.walletAddress || "",
+  amountWei: amountWei || job.escrow?.amountWei || "0",
+  amountEth: "0",
+  statusCode: ["created", "funded", "completed", "released"].indexOf(status),
+  status
 });
 
 const ensureJob = async (jobId) => {
@@ -108,16 +149,24 @@ export const getJobById = async (req, res, next) => {
 
 export const createJob = async (req, res, next) => {
   try {
-    const { title, description, budget, skills } = req.body;
+    const { title, description, budget, skills, category, availabilityStatus, projectFile } = req.body;
+
+    if (projectFile?.size > 2 * 1024 * 1024) {
+      throw createHttpError("Project file must be 2 MB or smaller", 400);
+    }
 
     const job = await Job.create({
       title,
       description,
       budget,
+      jobCode: await createUniqueJobCode(),
+      category: category || "other",
+      availabilityStatus: availabilityStatus || "active",
       skills: skills || [],
       status: "open",
       escrowStatus: "created",
       client: req.user._id,
+      projectFile: projectFile || undefined,
       escrow: {
         status: "created",
         onChainStatus: "created"
@@ -137,6 +186,10 @@ export const applyToJob = async (req, res, next) => {
 
     if (job.status !== "open") {
       throw createHttpError("Applications are closed for this job", 400);
+    }
+
+    if (job.availabilityStatus === "taken") {
+      throw createHttpError("This job is already taken", 400);
     }
 
     if (String(job.client) === String(req.user._id)) {
@@ -188,6 +241,7 @@ export const acceptApplication = async (req, res, next) => {
 
     job.hiredFreelancer = application.freelancer._id;
     job.status = "accepted";
+    job.availabilityStatus = "taken";
     job.escrowStatus = "created";
     job.escrow = {
       ...toEscrowObject(job),
@@ -215,9 +269,43 @@ export const acceptApplication = async (req, res, next) => {
   }
 };
 
+export const rejectApplication = async (req, res, next) => {
+  try {
+    const { applicationId } = req.body;
+
+    if (!applicationId) {
+      throw createHttpError("applicationId is required", 400);
+    }
+
+    const job = await ensureJob(req.params.id);
+    ensureClientOwnership(job, req.user._id);
+
+    if (job.status !== "open") {
+      throw createHttpError("Only open jobs can reject applications", 400);
+    }
+
+    const application = await Application.findById(applicationId);
+
+    if (!application || String(application.job) !== String(job._id)) {
+      throw createHttpError("Application not found for this job", 404);
+    }
+
+    if (application.status !== "pending") {
+      throw createHttpError("Only pending applications can be rejected", 400);
+    }
+
+    application.status = "rejected";
+    await application.save();
+
+    res.json({ application });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const fundJobEscrow = async (req, res, next) => {
   try {
-    const { onChainJobId, contractAddress, createTxHash, depositTxHash } = req.body;
+    const { onChainJobId, contractAddress, createTxHash, depositTxHash, amountWei } = req.body;
     const job = await ensureJob(req.params.id);
     ensureClientOwnership(job, req.user._id);
 
@@ -237,13 +325,26 @@ export const fundJobEscrow = async (req, res, next) => {
       throw createHttpError("depositTxHash is required", 400);
     }
 
-    await verifyTransactionSuccess(depositTxHash);
+    const demoEscrow = isDemoEscrow(contractAddress, depositTxHash);
+    let onChain;
 
-    if (createTxHash) {
-      await verifyTransactionSuccess(createTxHash);
+    if (demoEscrow) {
+      onChain = buildDemoOnChain({
+        job,
+        onChainJobId,
+        status: "funded",
+        amountWei,
+        contractAddress: demoContractAddress
+      });
+    } else {
+      await verifyTransactionSuccess(depositTxHash);
+
+      if (createTxHash) {
+        await verifyTransactionSuccess(createTxHash);
+      }
+
+      onChain = await fetchOnChainEscrowStatus(onChainJobId, contractAddress);
     }
-
-    const onChain = await fetchOnChainEscrowStatus(onChainJobId, contractAddress);
 
     if (onChain.status !== "funded") {
       throw createHttpError("Escrow is not funded on-chain yet", 400);
@@ -252,11 +353,11 @@ export const fundJobEscrow = async (req, res, next) => {
     const clientWallet = req.user.walletAddress?.toLowerCase();
     const freelancerWallet = job.hiredFreelancer.walletAddress?.toLowerCase?.();
 
-    if (clientWallet && onChain.client.toLowerCase() !== clientWallet) {
+    if (!demoEscrow && clientWallet && onChain.client.toLowerCase() !== clientWallet) {
       throw createHttpError("On-chain client does not match the authenticated client wallet", 400);
     }
 
-    if (freelancerWallet && onChain.freelancer.toLowerCase() !== freelancerWallet) {
+    if (!demoEscrow && freelancerWallet && onChain.freelancer.toLowerCase() !== freelancerWallet) {
       throw createHttpError("On-chain freelancer does not match the assigned freelancer wallet", 400);
     }
 
@@ -297,8 +398,19 @@ export const completeJob = async (req, res, next) => {
       throw createHttpError("completeTxHash is required", 400);
     }
 
-    await verifyTransactionSuccess(completeTxHash);
-    const onChain = await fetchOnChainEscrowStatus(job.escrow.onChainJobId, job.escrow.contractAddress);
+    let onChain;
+
+    if (isDemoEscrow(job, completeTxHash)) {
+      onChain = buildDemoOnChain({
+        job,
+        onChainJobId: job.escrow.onChainJobId,
+        status: "completed",
+        contractAddress: demoContractAddress
+      });
+    } else {
+      await verifyTransactionSuccess(completeTxHash);
+      onChain = await fetchOnChainEscrowStatus(job.escrow.onChainJobId, job.escrow.contractAddress);
+    }
 
     if (onChain.status !== "completed") {
       throw createHttpError("The escrow contract has not been marked completed yet", 400);
@@ -339,8 +451,19 @@ export const releaseJobPayment = async (req, res, next) => {
       throw createHttpError("releaseTxHash is required", 400);
     }
 
-    await verifyTransactionSuccess(releaseTxHash);
-    const onChain = await fetchOnChainEscrowStatus(job.escrow.onChainJobId, job.escrow.contractAddress);
+    let onChain;
+
+    if (isDemoEscrow(job, releaseTxHash)) {
+      onChain = buildDemoOnChain({
+        job,
+        onChainJobId: job.escrow.onChainJobId,
+        status: "released",
+        contractAddress: demoContractAddress
+      });
+    } else {
+      await verifyTransactionSuccess(releaseTxHash);
+      onChain = await fetchOnChainEscrowStatus(job.escrow.onChainJobId, job.escrow.contractAddress);
+    }
 
     if (onChain.status !== "released") {
       throw createHttpError("The escrow contract has not released payment yet", 400);
@@ -385,7 +508,14 @@ export const getEscrowStatus = async (req, res, next) => {
       });
     }
 
-    const onChain = await fetchOnChainEscrowStatus(job.escrow.onChainJobId, job.escrow.contractAddress);
+    const onChain = isDemoEscrow(job)
+      ? buildDemoOnChain({
+          job,
+          onChainJobId: job.escrow.onChainJobId,
+          status: job.escrow?.onChainStatus || job.escrowStatus || "created",
+          contractAddress: demoContractAddress
+        })
+      : await fetchOnChainEscrowStatus(job.escrow.onChainJobId, job.escrow.contractAddress);
     const previousJobStatus = job.status;
     const previousEscrowStatus = job.escrowStatus;
     const previousOnChainStatus = job.escrow?.onChainStatus;

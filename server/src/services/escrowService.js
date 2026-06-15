@@ -6,18 +6,17 @@ const escrowAbi = [
   "function getJob(uint256 jobId) view returns (address client, address freelancer, uint256 amount, uint8 status)"
 ];
 
-const getProvider = () => {
-  const rpcUrl = process.env.BLOCKCHAIN_RPC_URL;
+const localRpcUrl = "http://127.0.0.1:8545";
+const localHardhatEscrowAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 
-  if (!rpcUrl) {
-    throw new Error("BLOCKCHAIN_RPC_URL is not configured");
-  }
+const getProvider = () => {
+  const rpcUrl = process.env.BLOCKCHAIN_RPC_URL || localRpcUrl;
 
   return new JsonRpcProvider(rpcUrl);
 };
 
 const getContractAddress = (addressOverride = "") => {
-  const contractAddress = addressOverride || process.env.ESCROW_CONTRACT_ADDRESS;
+  const contractAddress = addressOverride || process.env.ESCROW_CONTRACT_ADDRESS || localHardhatEscrowAddress;
 
   if (!contractAddress) {
     throw new Error("ESCROW_CONTRACT_ADDRESS is not configured");

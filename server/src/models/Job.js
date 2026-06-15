@@ -14,6 +14,25 @@ const jobSchema = new mongoose.Schema(
       type: Number,
       required: true
     },
+    jobCode: {
+      type: String,
+      required: true,
+      unique: true,
+      sparse: true,
+      uppercase: true,
+      minlength: 5,
+      maxlength: 5
+    },
+    category: {
+      type: String,
+      enum: ["web_dev", "design", "writing", "app_dev", "marketing", "other"],
+      default: "other"
+    },
+    availabilityStatus: {
+      type: String,
+      enum: ["active", "taken"],
+      default: "active"
+    },
     skills: {
       type: [String],
       default: []
@@ -37,6 +56,24 @@ const jobSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null
+    },
+    projectFile: {
+      name: {
+        type: String,
+        default: ""
+      },
+      type: {
+        type: String,
+        default: ""
+      },
+      size: {
+        type: Number,
+        default: 0
+      },
+      dataUrl: {
+        type: String,
+        default: ""
+      }
     },
     escrow: {
       onChainJobId: {
